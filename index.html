@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>麻将馆智能排桌</title>
+    <meta name="theme-color" content="#0f766e" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="麻将排桌" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icon.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">麻将馆排桌助手</p>
+          <h1>今日排桌</h1>
+        </div>
+        <div class="top-actions">
+          <button class="ghost" id="resetSampleBtn" type="button" title="恢复示例数据">
+            <span aria-hidden="true">↺</span>
+            恢复示例
+          </button>
+          <button class="primary" id="arrangeBtn" type="button" title="根据今日报名自动排桌">
+            <span aria-hidden="true">✓</span>
+            自动排桌
+          </button>
+        </div>
+      </header>
+
+      <section class="summary-strip" aria-label="今日概览">
+        <button class="summary-card" type="button" data-detail="attendance" title="查看今日报名名单">
+          <span class="summary-label">今日报名</span>
+          <strong id="activeCount">0</strong>
+          <span class="summary-action">查看名单</span>
+        </button>
+        <button class="summary-card" type="button" data-detail="tables" title="查看已排桌详情">
+          <span class="summary-label">可排桌数</span>
+          <strong id="tableCount">0</strong>
+          <span class="summary-action">查看桌号</span>
+        </button>
+        <button class="summary-card" type="button" data-detail="waiting" title="查看暂未安排的人">
+          <span class="summary-label">暂未安排</span>
+          <strong id="waitingCount">0</strong>
+          <span class="summary-action">查看原因</span>
+        </button>
+        <button class="summary-card" type="button" data-detail="conflicts" title="查看关系限制详情">
+          <span class="summary-label">关系限制</span>
+          <strong id="conflictCount">0</strong>
+          <span class="summary-action">查看关系</span>
+        </button>
+      </section>
+
+      <div class="workspace">
+        <section class="panel attendance-panel" aria-labelledby="attendanceTitle">
+          <div class="panel-head">
+            <div>
+              <h2 id="attendanceTitle">今日报名</h2>
+              <p>勾选今天会来的客人</p>
+            </div>
+            <button class="icon-button" id="toggleAllBtn" type="button" title="全选或取消全选">☑</button>
+          </div>
+          <div class="filter-row">
+            <label>
+              <span>按金额看</span>
+              <select id="stakeFilter">
+                <option value="all">全部</option>
+                <option value="1">可打一</option>
+                <option value="2">可打二</option>
+                <option value="3">可打三</option>
+                <option value="4">可打四</option>
+              </select>
+            </label>
+            <label>
+              <span>按水平看</span>
+              <select id="skillFilter">
+                <option value="all">全部</option>
+                <option value="新手">新手</option>
+                <option value="熟手">熟手</option>
+                <option value="高手">高手</option>
+              </select>
+            </label>
+          </div>
+          <div class="player-list" id="playerList"></div>
+        </section>
+
+        <section class="panel results-panel" aria-labelledby="resultTitle">
+          <div class="panel-head">
+            <div>
+              <h2 id="resultTitle">排桌结果</h2>
+              <p id="resultNote">点击“自动排桌”后生成</p>
+            </div>
+            <button class="icon-button" id="copyBtn" type="button" title="复制排桌结果">⧉</button>
+          </div>
+          <div id="tableResults" class="table-results empty-state">
+            <strong>还没有排桌</strong>
+            <span>先勾选今天到场的人，再自动排桌。</span>
+          </div>
+          <div class="waiting-box">
+            <h3>暂未安排</h3>
+            <div id="waitingList" class="waiting-list">暂无</div>
+          </div>
+        </section>
+
+        <section class="panel manage-panel" aria-labelledby="manageTitle">
+          <div class="panel-head">
+            <div>
+              <h2 id="manageTitle">玩家与规则</h2>
+              <p>维护常客偏好和不愿同桌关系</p>
+            </div>
+          </div>
+
+          <form class="player-form" id="playerForm">
+            <label>
+              <span>姓名</span>
+              <input id="nameInput" name="name" type="text" placeholder="例如：张三" required />
+            </label>
+            <label>
+              <span>常打金额</span>
+              <select id="preferredInput" name="preferred">
+                <option value="1">一</option>
+                <option value="2">二</option>
+                <option value="3">三</option>
+                <option value="4">四</option>
+              </select>
+            </label>
+            <fieldset>
+              <legend>可接受金额</legend>
+              <label><input type="checkbox" name="stakes" value="1" checked /> 一</label>
+              <label><input type="checkbox" name="stakes" value="2" /> 二</label>
+              <label><input type="checkbox" name="stakes" value="3" /> 三</label>
+              <label><input type="checkbox" name="stakes" value="4" /> 四</label>
+            </fieldset>
+            <label>
+              <span>水平</span>
+              <select id="skillInput" name="skill">
+                <option value="新手">新手</option>
+                <option value="熟手" selected>熟手</option>
+                <option value="高手">高手</option>
+              </select>
+            </label>
+            <button class="secondary" type="submit">添加玩家</button>
+          </form>
+
+          <div class="rule-box">
+            <h3>不愿同桌</h3>
+            <div class="conflict-controls">
+              <select id="fromPlayer"></select>
+              <span>不想和</span>
+              <select id="toPlayer"></select>
+              <button class="secondary compact" id="addConflictBtn" type="button">添加</button>
+            </div>
+            <div id="conflictList" class="conflict-list"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <template id="playerTemplate">
+      <article class="player-row">
+        <label class="check-wrap">
+          <input class="attend-check" type="checkbox" />
+          <span class="checkmark"></span>
+        </label>
+        <div class="player-main">
+          <div class="player-name-line">
+            <strong></strong>
+            <span class="skill-pill"></span>
+          </div>
+          <div class="player-meta"></div>
+        </div>
+        <button class="mini-button delete-player" type="button" title="删除玩家">×</button>
+      </article>
+    </template>
+
+    <div class="detail-modal" id="detailModal" hidden>
+      <div class="detail-backdrop" data-close-detail></div>
+      <section class="detail-sheet" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+        <header class="detail-head">
+          <button class="detail-back" type="button" data-close-detail>返回</button>
+          <h2 id="detailTitle">详情</h2>
+        </header>
+        <div class="detail-body" id="detailBody"></div>
+      </section>
+    </div>
+
+    <script src="./app.js"></script>
+    <script>
+      if ("serviceWorker" in navigator && location.protocol !== "file:") {
+        navigator.serviceWorker.register("./sw.js").catch(() => {});
+      }
+    </script>
+  </body>
+</html>
