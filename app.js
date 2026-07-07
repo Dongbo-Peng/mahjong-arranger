@@ -806,7 +806,7 @@ function renderPlayerEditor(playerId, returnKind = "attendance") {
         </div>
       </section>
       <div class="edit-actions">
-        <button class="primary" type="submit">保存修改</button>
+        <button class="primary" type="button" data-save-player-edit>保存修改</button>
         <button class="ghost" type="button" data-cancel-edit="${returnKind}">取消</button>
       </div>
     </form>
@@ -1207,6 +1207,13 @@ elements.detailBody.addEventListener("click", (event) => {
   const deleteDislikeButton = event.target.closest("[data-delete-player-dislike]");
   if (deleteDislikeButton) {
     deletePlayerDislike(deleteDislikeButton.dataset.deletePlayerDislike, deleteDislikeButton.dataset.targetPlayer);
+    return;
+  }
+
+  const savePlayerButton = event.target.closest("[data-save-player-edit]");
+  if (savePlayerButton) {
+    const form = savePlayerButton.closest("[data-player-edit-form]");
+    if (form) savePlayerEdit(form);
   }
 });
 
