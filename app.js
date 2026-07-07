@@ -850,8 +850,12 @@ function refreshScheduleViews() {
 }
 
 function savePlayerEdit(form) {
-  const player = getPlayer(form.dataset.playerId);
-  if (!player) return;
+  const playerId = form.dataset.playerId;
+  const playerIndex = state.players.findIndex((item) => item.id === playerId);
+  if (playerIndex < 0) {
+    showToast("没有找到这个玩家");
+    return;
+  }
 
   const name = form.elements.namedItem("name").value.trim();
   const stakes = Array.from(form.querySelectorAll('input[name="stakes"]:checked')).map((input) => input.value);
@@ -861,15 +865,26 @@ function savePlayerEdit(form) {
     return;
   }
 
-  player.name = name;
-  player.skill = form.elements.namedItem("skill").value;
-  player.preferred = preferred;
-  player.stakes = [...new Set(stakes.includes(preferred) ? stakes : [...stakes, preferred])].sort((a, b) => Number(a) - Number(b));
-  player.active = form.elements.namedItem("active").checked;
+  const updatedPlayer = {
+    ...state.players[playerIndex],
+    name,
+    skill: form.elements.namedItem("skill").value,
+    preferred,
+    stakes: [...new Set(stakes.includes(preferred) ? stakes : [...stakes, preferred])].sort((a, b) => Number(a) - Number(b)),
+    active: form.elements.namedItem("active").checked,
+  };
+  state.players.splice(playerIndex, 1, updatedPlayer);
 
+  clearSchedule();
   saveState();
+  const savedAgain = getPlayer(playerId);
+  if (!savedAgain || savedAgain.name !== name) {
+    showToast("保存没有成功，请再点一次");
+    return;
+  }
+
   render();
-  refreshScheduleViews();
+  renderEmptyResults();
   showToast("已保存");
   openDetail(form.dataset.returnKind || "attendance");
 }
