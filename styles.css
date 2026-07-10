@@ -812,8 +812,7 @@ fieldset label {
 
 .detail-seat {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: 1fr;
   gap: 10px;
   min-height: 52px;
   padding: 10px 12px;
@@ -822,31 +821,68 @@ fieldset label {
   background: #fff;
 }
 
-.seat-action-panel {
-  grid-column: 1 / -1;
+.seat-main {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  width: 100%;
-  padding-top: 8px;
-  border-top: 1px dashed var(--line);
+  gap: 7px;
 }
 
-.seat-action-panel label {
-  display: grid;
-  gap: 5px;
-}
-
-.seat-action-panel label span {
+.seat-main > span,
+.seat-replace-title {
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
 }
 
-.seat-action-panel button,
-.seat-action-panel select {
+.seat-name-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   width: 100%;
-  min-height: 44px;
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 1px solid #b8dbd5;
+  border-radius: 8px;
+  background: #f0fbf8;
+  color: var(--ink);
+  text-align: left;
+}
+
+.seat-name-button em {
+  color: var(--green-dark);
+  font-style: normal;
+  font-weight: 800;
+}
+
+.seat-replace-panel {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.replacement-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.replacement-person {
+  display: grid;
+  gap: 5px;
+  min-height: 64px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.replacement-person span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .detail-seat strong {
@@ -1565,13 +1601,20 @@ fieldset label {
     padding: 12px;
   }
 
-  .seat-action-panel {
+  .seat-name-button {
+    min-height: 64px;
+  }
+
+  .replacement-grid {
     grid-template-columns: 1fr;
     gap: 9px;
   }
 
+  .replacement-person {
+    min-height: 62px;
+  }
+
   .detail-seat select,
-  .seat-action-panel select,
   .table-stake-edit select,
   .edit-form select,
   .edit-form input[type="text"],

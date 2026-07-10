@@ -37,6 +37,7 @@ const sampleState = {
 let state = loadState();
 let lastSchedule = hydrateSavedSchedule(state.savedSchedule);
 const playerEditDrafts = new Map();
+let seatPickerTarget = null;
 
 const elements = {
   activeCount: document.querySelector("#activeCount"),
@@ -629,27 +630,6 @@ function playerOptions(selectedId) {
   ].join("");
 }
 
-function waitingPlayerOptions(schedule) {
-  if (!schedule.waiting.length) return `<option value="">暂无待定人员</option>`;
-  return [
-    `<option value="">选择待定人员</option>`,
-    ...schedule.waiting.map(({ player }) => `<option value="${player.id}">${escapeHtml(player.name)}</option>`),
-  ].join("");
-}
-
-function seatedPlayerOptions(schedule, currentId) {
-  const options = [];
-  schedule.tables.forEach((table, tableIndex) => {
-    normalizedSeats(table).forEach((player, seatIndex) => {
-      if (!player || player.id === currentId) return;
-      options.push(
-        `<option value="${player.id}">${tableIndex + 1}桌${seatIndex + 1}位 ${escapeHtml(player.name)}</option>`,
-      );
-    });
-  });
-  return options.length ? [`<option value="">选择要交换的人</option>`, ...options].join("") : `<option value="">暂无可交换人员</option>`;
-}
-
 function allPlayerOptions(selectedId) {
   return state.players.map((player) => `<option value="${player.id}" ${player.id === selectedId ? "selected" : ""}>${escapeHtml(player.name)}</option>`).join("");
 }
@@ -754,9 +734,53 @@ function addPlayer({ name, preferred = "2", stakes = ["1", "2"], active = true }
   return true;
 }
 
-function renderTablesDetail(schedule) {
-  const waitingOptions = waitingPlayerOptions(schedule);
+function seatPickerOpen(tableIndex, seatIndex) {
+  return seatPickerTarget && seatPickerTarget.tableIndex === tableIndex && seatPickerTarget.seatIndex === seatIndex;
+}
 
+function tableMemberIds(table) {
+  return new Set(normalizedSeats(table).filter(Boolean).map((player) => player.id));
+}
+
+function playerSeatLabel(schedule, playerId) {
+  for (let tableIndex = 0; tableIndex < schedule.tables.length; tableIndex += 1) {
+    const seats = normalizedSeats(schedule.tables[tableIndex]);
+    for (let seatIndex = 0; seatIndex < seats.length; seatIndex += 1) {
+      if (seats[seatIndex] && seats[seatIndex].id === playerId) {
+        return `${tableIndex + 1}桌${seatIndex + 1}位`;
+      }
+    }
+  }
+  return "待定";
+}
+
+function replacementButtons(schedule, tableIndex, seatIndex) {
+  const targetTable = schedule.tables[tableIndex];
+  if (!targetTable) return "";
+  const currentTableIds = tableMemberIds(targetTable);
+  const candidates = activePlayers().filter((player) => !currentTableIds.has(player.id));
+
+  if (!candidates.length) {
+    return `<div class="relation-empty-text">暂时没有本桌以外的报名人员。</div>`;
+  }
+
+  return `
+    <div class="replacement-grid">
+      ${candidates
+        .map(
+          (player) => `
+            <button class="replacement-person" type="button" data-replace-seat data-table-index="${tableIndex}" data-seat-index="${seatIndex}" data-player-id="${player.id}">
+              <strong>${escapeHtml(player.name)}</strong>
+              <span>${escapeHtml(playerSeatLabel(schedule, player.id))} · 常打${player.preferred}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderTablesDetail(schedule) {
   if (!schedule.tables.length) {
     return `
       <div class="detail-tools">
@@ -791,40 +815,14 @@ function renderTablesDetail(schedule) {
                   .map(
                     (player, seatIndex) => `
                       <div class="detail-seat">
-                        <label>
+                        <div class="seat-main">
                           <span>${seatIndex + 1} 号位</span>
-                          <select data-seat-select data-table-index="${index}" data-seat-index="${seatIndex}">
-                            ${playerOptions(player ? player.id : "")}
-                          </select>
-                        </label>
-                        ${
-                          player
-                            ? `<span class="stake-pill">常打${player.preferred}</span>`
-                            : `<span class="stake-pill">空位</span>`
-                        }
-                        <div class="seat-action-panel">
-                          ${
-                            player
-                              ? `
-                                <button class="ghost compact" type="button" data-move-seat-waiting data-table-index="${index}" data-seat-index="${seatIndex}">移到待定</button>
-                                <label>
-                                  <span>与桌上人员交换</span>
-                                  <select data-swap-seat-select="${index}-${seatIndex}">
-                                    ${seatedPlayerOptions(schedule, player.id)}
-                                  </select>
-                                </label>
-                                <button class="secondary compact" type="button" data-swap-seat data-table-index="${index}" data-seat-index="${seatIndex}">确认交换</button>
-                              `
-                              : ""
-                          }
-                          <label>
-                            <span>${player ? "从待定换入" : "从待定补入"}</span>
-                            <select data-waiting-seat-select="${index}-${seatIndex}">
-                              ${waitingOptions}
-                            </select>
-                          </label>
-                          <button class="secondary compact" type="button" data-fill-seat-waiting data-table-index="${index}" data-seat-index="${seatIndex}">${player ? "换入此位" : "补入此位"}</button>
+                          <button class="seat-name-button" type="button" data-open-seat-picker data-table-index="${index}" data-seat-index="${seatIndex}">
+                            <strong>${player ? escapeHtml(player.name) : "空位"}</strong>
+                            <em>${player ? `常打${player.preferred}` : "点这里补人"}</em>
+                          </button>
                         </div>
+                        ${seatPickerOpen(index, seatIndex) ? `<div class="seat-replace-panel"><div class="seat-replace-title">选择一位非本桌人员，点名字直接调入</div>${replacementButtons(schedule, index, seatIndex)}<button class="ghost compact" type="button" data-close-seat-picker>收起</button></div>` : ""}
                       </div>
                     `,
                   )
@@ -1234,44 +1232,25 @@ function setTableSeat(tableIndex, seatIndex, playerId, message = "") {
   if (message) showToast(message);
 }
 
-function moveSeatToWaiting(tableIndex, seatIndex) {
-  setTableSeat(tableIndex, seatIndex, "", "已移到待定");
-}
-
-function fillSeatFromWaiting(tableIndex, seatIndex, playerId) {
-  if (!playerId) {
-    showToast("请先选择待定人员");
-    return;
-  }
-  setTableSeat(tableIndex, seatIndex, playerId, "已换入座位");
-}
-
-function swapSeatWithPlayer(tableIndex, seatIndex, targetPlayerId) {
-  if (!targetPlayerId) {
-    showToast("请先选择要交换的人");
-    return;
-  }
-
+function openSeatPicker(tableIndex, seatIndex) {
   const schedule = ensureSchedule();
-  normalizeSchedule(schedule);
-  const targetTable = schedule.tables[tableIndex];
-  const otherSeat = findPlayerSeat(schedule, targetPlayerId);
-  if (!targetTable || !otherSeat) {
-    showToast("没有找到要交换的人");
-    return;
-  }
-
-  const currentPlayer = targetTable.group[seatIndex] || null;
-  if (!currentPlayer) {
-    showToast("这个座位现在是空位");
-    return;
-  }
-
-  targetTable.group[seatIndex] = otherSeat.table.group[otherSeat.sIndex];
-  otherSeat.table.group[otherSeat.sIndex] = currentPlayer;
-  refreshScheduleViews();
+  seatPickerTarget = { tableIndex, seatIndex };
   showDetail("已排桌号", renderTablesDetail(schedule));
-  showToast("已交换座位");
+}
+
+function closeSeatPicker() {
+  const schedule = ensureSchedule();
+  seatPickerTarget = null;
+  showDetail("已排桌号", renderTablesDetail(schedule));
+}
+
+function replaceSeatWithPlayer(tableIndex, seatIndex, playerId) {
+  if (!playerId) {
+    showToast("请选择要调入的人");
+    return;
+  }
+  seatPickerTarget = null;
+  setTableSeat(tableIndex, seatIndex, playerId, "已调入本桌");
 }
 
 function renderConflictsDetail() {
@@ -1724,27 +1703,24 @@ elements.detailBody.addEventListener("click", (event) => {
     return;
   }
 
-  const moveSeatButton = event.target.closest("[data-move-seat-waiting]");
-  if (moveSeatButton) {
-    moveSeatToWaiting(Number(moveSeatButton.dataset.tableIndex), Number(moveSeatButton.dataset.seatIndex));
+  const openSeatPickerButton = event.target.closest("[data-open-seat-picker]");
+  if (openSeatPickerButton) {
+    openSeatPicker(Number(openSeatPickerButton.dataset.tableIndex), Number(openSeatPickerButton.dataset.seatIndex));
     return;
   }
 
-  const fillSeatButton = event.target.closest("[data-fill-seat-waiting]");
-  if (fillSeatButton) {
-    const tableIndex = Number(fillSeatButton.dataset.tableIndex);
-    const seatIndex = Number(fillSeatButton.dataset.seatIndex);
-    const select = elements.detailBody.querySelector(`[data-waiting-seat-select="${tableIndex}-${seatIndex}"]`);
-    fillSeatFromWaiting(tableIndex, seatIndex, select ? select.value : "");
+  if (event.target.closest("[data-close-seat-picker]")) {
+    closeSeatPicker();
     return;
   }
 
-  const swapSeatButton = event.target.closest("[data-swap-seat]");
-  if (swapSeatButton) {
-    const tableIndex = Number(swapSeatButton.dataset.tableIndex);
-    const seatIndex = Number(swapSeatButton.dataset.seatIndex);
-    const select = elements.detailBody.querySelector(`[data-swap-seat-select="${tableIndex}-${seatIndex}"]`);
-    swapSeatWithPlayer(tableIndex, seatIndex, select ? select.value : "");
+  const replaceSeatButton = event.target.closest("[data-replace-seat]");
+  if (replaceSeatButton) {
+    replaceSeatWithPlayer(
+      Number(replaceSeatButton.dataset.tableIndex),
+      Number(replaceSeatButton.dataset.seatIndex),
+      replaceSeatButton.dataset.playerId,
+    );
     return;
   }
 
@@ -1814,11 +1790,6 @@ elements.detailBody.addEventListener("change", (event) => {
   if (tableStake) {
     setTableStake(Number(tableStake.dataset.tableStake), tableStake.value);
     return;
-  }
-
-  const seatSelect = event.target.closest("[data-seat-select]");
-  if (seatSelect) {
-    setTableSeat(Number(seatSelect.dataset.tableIndex), Number(seatSelect.dataset.seatIndex), seatSelect.value);
   }
 });
 
