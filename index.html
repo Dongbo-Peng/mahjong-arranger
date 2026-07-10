@@ -20,13 +20,9 @@
           <h1>今日排桌</h1>
         </div>
         <div class="top-actions">
-          <button class="ghost" id="dataManageBtn" type="button" title="查看保存说明和备份数据">
+          <button class="secondary data-top-button" id="dataManageBtn" type="button" title="复制备份码、导出备份文件、恢复备份">
             <span aria-hidden="true">▣</span>
-            数据保存
-          </button>
-          <button class="ghost" id="resetSampleBtn" type="button" title="恢复示例数据">
-            <span aria-hidden="true">↺</span>
-            恢复示例
+            备份/恢复数据
           </button>
           <button class="primary" id="arrangeBtn" type="button" title="根据今日报名自动排桌">
             <span aria-hidden="true">✓</span>
@@ -55,6 +51,16 @@
           <span class="summary-label">关系限制</span>
           <strong id="conflictCount">0</strong>
           <span class="summary-action">查看关系</span>
+        </button>
+        <button class="summary-card backup-summary-card" type="button" data-detail="data" title="备份或恢复名单数据">
+          <span class="summary-label">数据备份</span>
+          <strong>备份</strong>
+          <span class="summary-action">复制/导出/恢复</span>
+        </button>
+        <button class="summary-card" type="button" data-detail="history" title="查看历史排桌记录">
+          <span class="summary-label">历史记录</span>
+          <strong id="historyCount">0</strong>
+          <span class="summary-action">查看历史</span>
         </button>
       </section>
 

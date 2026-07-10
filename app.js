@@ -29,6 +29,8 @@ const sampleState = {
     { from: "p9", to: "p12" },
   ],
   savedSchedule: null,
+  savedScheduleDate: null,
+  history: [],
   updatedAt: null,
 };
 
@@ -41,6 +43,7 @@ const elements = {
   tableCount: document.querySelector("#tableCount"),
   waitingCount: document.querySelector("#waitingCount"),
   conflictCount: document.querySelector("#conflictCount"),
+  historyCount: document.querySelector("#historyCount"),
   summaryCards: document.querySelectorAll("[data-detail]"),
   playerList: document.querySelector("#playerList"),
   tableResults: document.querySelector("#tableResults"),
@@ -50,7 +53,6 @@ const elements = {
   toggleAllBtn: document.querySelector("#toggleAllBtn"),
   arrangeBtn: document.querySelector("#arrangeBtn"),
   dataManageBtn: document.querySelector("#dataManageBtn"),
-  resetSampleBtn: document.querySelector("#resetSampleBtn"),
   copyBtn: document.querySelector("#copyBtn"),
   playerForm: document.querySelector("#playerForm"),
   preferredInput: document.querySelector("#preferredInput"),
@@ -74,7 +76,13 @@ function loadState() {
       return structuredClone(sampleState);
     }
     if (!Array.isArray(parsed.likes)) parsed.likes = [];
+    if (!Array.isArray(parsed.history)) parsed.history = [];
     if (!("savedSchedule" in parsed)) parsed.savedSchedule = null;
+    if (!("savedScheduleDate" in parsed)) parsed.savedScheduleDate = null;
+    if (parsed.savedScheduleDate && parsed.savedScheduleDate !== todayKey()) {
+      parsed.savedSchedule = null;
+      parsed.savedScheduleDate = null;
+    }
     if (!("updatedAt" in parsed)) parsed.updatedAt = null;
     return parsed;
   } catch {
@@ -87,6 +95,19 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+function todayKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function displayDate(dateKey) {
+  if (!dateKey) return "未记录日期";
+  const [year, month, day] = dateKey.split("-");
+  return `${year}年${month}月${day}日`;
+}
+
 function serializeSchedule(schedule) {
   if (!schedule) return null;
   return {
@@ -96,6 +117,31 @@ function serializeSchedule(schedule) {
       manual: Boolean(table.manual),
     })),
   };
+}
+
+function scheduleStats(schedule) {
+  if (!schedule) return { tableCount: 0, waitingCount: 0, seatedCount: 0 };
+  return {
+    tableCount: schedule.tables.filter((table) => table.group.some(Boolean)).length,
+    waitingCount: schedule.waiting.length,
+    seatedCount: schedule.tables.reduce((sum, table) => sum + table.group.filter(Boolean).length, 0),
+  };
+}
+
+function rememberScheduleHistory(schedule) {
+  if (!schedule) return;
+  if (!Array.isArray(state.history)) state.history = [];
+  const date = todayKey();
+  const stats = scheduleStats(schedule);
+  const record = {
+    date,
+    savedAt: new Date().toISOString(),
+    tableCount: stats.tableCount,
+    waitingCount: stats.waitingCount,
+    seatedCount: stats.seatedCount,
+    text: scheduleText(schedule),
+  };
+  state.history = [record, ...state.history.filter((item) => item && item.date !== date)].slice(0, 60);
 }
 
 function hydrateSavedSchedule(savedSchedule) {
@@ -116,12 +162,16 @@ function hydrateSavedSchedule(savedSchedule) {
 
 function saveSchedule() {
   state.savedSchedule = serializeSchedule(lastSchedule);
+  state.savedScheduleDate = todayKey();
+  rememberScheduleHistory(lastSchedule);
   saveState();
+  renderSummary();
 }
 
 function clearSchedule() {
   lastSchedule = null;
   state.savedSchedule = null;
+  state.savedScheduleDate = null;
 }
 
 function stakeText(value) {
@@ -361,6 +411,7 @@ function renderSummary() {
   elements.tableCount.textContent = lastSchedule ? lastSchedule.tables.filter((table) => table.group.some(Boolean)).length : 0;
   elements.waitingCount.textContent = lastSchedule ? lastSchedule.waiting.length : activePlayers().length;
   elements.conflictCount.textContent = state.conflicts.length + state.likes.length;
+  if (elements.historyCount) elements.historyCount.textContent = Array.isArray(state.history) ? state.history.length : 0;
 }
 
 function renderPlayers() {
@@ -545,8 +596,12 @@ function openDetail(kind) {
     showDetail("关系限制", renderConflictsDetail());
     return;
   }
+  if (kind === "history") {
+    showDetail("历史记录", renderHistoryDetail());
+    return;
+  }
   if (kind === "data") {
-    showDetail("数据保存", renderDataDetail());
+    showDetail("备份/恢复数据", renderDataDetail());
   }
 }
 
@@ -672,6 +727,9 @@ function renderAttendanceDetail() {
         <button class="primary" type="submit">添加</button>
       </div>
     </form>
+    <div class="detail-tools backup-detail-entry">
+      <button class="secondary" type="button" data-open-detail="data">备份/恢复数据</button>
+    </div>
   `;
 }
 
@@ -902,6 +960,11 @@ function renderDataDetail() {
     </section>
 
     <section class="data-card">
+      <h3>每天怎么用</h3>
+      <p>每天打开后，先在“今日报名”勾选今天到场的人，再点“自动排桌”。如果当天报名变化了，再点一次“自动排桌”即可。每天排桌结果会自动保存到“历史记录”。</p>
+    </section>
+
+    <section class="data-card">
       <h3>备份当前数据</h3>
       <div class="data-actions">
         <button class="primary" type="button" data-copy-backup>复制备份码</button>
@@ -932,6 +995,44 @@ function renderDataDetail() {
       <h3>以后要注册登录怎么办</h3>
       <p>如果要多台手机共用同一份名单、老板和员工都能同步，就需要下一阶段接云数据库和登录系统。当前版本先保证单手机使用简单稳定。</p>
     </section>
+  `;
+}
+
+function renderHistoryDetail() {
+  const history = Array.isArray(state.history) ? state.history : [];
+  if (!history.length) {
+    return `
+      <section class="data-card">
+        <h3>还没有历史记录</h3>
+        <p>当天点“自动排桌”后，会自动保存一条今天的历史记录。第二天打开时，今日排桌会重新开始，昨天的结果可以在这里查看。</p>
+      </section>
+    `;
+  }
+
+  return `
+    <div class="history-list">
+      ${history
+        .map(
+          (record, index) => `
+            <article class="history-card">
+              <div class="history-card-head">
+                <div>
+                  <strong>${escapeHtml(displayDate(record.date))}</strong>
+                  <span>${formatDateTime(record.savedAt)}</span>
+                </div>
+                <button class="secondary compact" type="button" data-copy-history="${index}">复制</button>
+              </div>
+              <div class="history-stats">
+                <span>${Number(record.tableCount) || 0} 桌</span>
+                <span>${Number(record.seatedCount) || 0} 人已安排</span>
+                <span>${Number(record.waitingCount) || 0} 人待定</span>
+              </div>
+              <pre>${escapeHtml(record.text || "没有记录内容")}</pre>
+            </article>
+          `,
+        )
+        .join("")}
+    </div>
   `;
 }
 
@@ -1438,6 +1539,20 @@ async function copyBackup() {
   }
 }
 
+async function copyHistory(index) {
+  const record = Array.isArray(state.history) ? state.history[index] : null;
+  if (!record || !record.text) {
+    showToast("没有找到这条历史记录");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(`${displayDate(record.date)}\n${record.text}`);
+    showToast("历史记录已复制");
+  } catch {
+    showToast("复制失败，可手动选中文字");
+  }
+}
+
 function normalizeImportedState(raw) {
   const candidate = raw && raw.state ? raw.state : raw;
   if (!candidate || !Array.isArray(candidate.players) || !Array.isArray(candidate.conflicts)) {
@@ -1473,6 +1588,18 @@ function normalizeImportedState(raw) {
     conflicts: cleanRules(candidate.conflicts),
     likes: cleanRules(candidate.likes),
     savedSchedule: candidate.savedSchedule && typeof candidate.savedSchedule === "object" ? candidate.savedSchedule : null,
+    savedScheduleDate: typeof candidate.savedScheduleDate === "string" ? candidate.savedScheduleDate : null,
+    history: (Array.isArray(candidate.history) ? candidate.history : [])
+      .filter((record) => record && record.date && record.text)
+      .map((record) => ({
+        date: String(record.date),
+        savedAt: record.savedAt || new Date().toISOString(),
+        tableCount: Number(record.tableCount) || 0,
+        waitingCount: Number(record.waitingCount) || 0,
+        seatedCount: Number(record.seatedCount) || 0,
+        text: String(record.text),
+      }))
+      .slice(0, 60),
     updatedAt: new Date().toISOString(),
   };
 }
@@ -1494,7 +1621,7 @@ function restoreBackupText(text) {
       renderEmptyResults();
     }
     showToast("已恢复数据");
-    showDetail("数据保存", renderDataDetail());
+    showDetail("备份/恢复数据", renderDataDetail());
   } catch {
     showToast("备份码不正确");
   }
@@ -1538,6 +1665,12 @@ elements.detailBody.addEventListener(
 );
 
 elements.detailBody.addEventListener("click", (event) => {
+  const detailButton = event.target.closest("[data-open-detail]");
+  if (detailButton) {
+    openDetail(detailButton.dataset.openDetail);
+    return;
+  }
+
   if (event.target.closest("[data-copy-backup]")) {
     copyBackup();
     return;
@@ -1545,6 +1678,12 @@ elements.detailBody.addEventListener("click", (event) => {
 
   if (event.target.closest("[data-download-backup]")) {
     downloadBackup();
+    return;
+  }
+
+  const copyHistoryButton = event.target.closest("[data-copy-history]");
+  if (copyHistoryButton) {
+    copyHistory(Number(copyHistoryButton.dataset.copyHistory));
     return;
   }
 
@@ -1734,16 +1873,6 @@ elements.toggleAllBtn.addEventListener("click", () => {
   state.players.forEach((player) => {
     player.active = shouldAttend;
   });
-  clearSchedule();
-  saveState();
-  render();
-  renderEmptyResults();
-});
-
-elements.resetSampleBtn.addEventListener("click", () => {
-  const ok = window.confirm("确定恢复示例数据吗？当前修改会被覆盖。");
-  if (!ok) return;
-  state = structuredClone(sampleState);
   clearSchedule();
   saveState();
   render();
