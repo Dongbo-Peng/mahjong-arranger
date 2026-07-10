@@ -20,6 +20,10 @@
           <h1>今日排桌</h1>
         </div>
         <div class="top-actions">
+          <button class="ghost" id="dataManageBtn" type="button" title="查看保存说明和备份数据">
+            <span aria-hidden="true">▣</span>
+            数据保存
+          </button>
           <button class="ghost" id="resetSampleBtn" type="button" title="恢复示例数据">
             <span aria-hidden="true">↺</span>
             恢复示例
@@ -74,15 +78,6 @@
                 <option value="4">可打四</option>
               </select>
             </label>
-            <label>
-              <span>按水平看</span>
-              <select id="skillFilter">
-                <option value="all">全部</option>
-                <option value="新手">新手</option>
-                <option value="熟手">熟手</option>
-                <option value="高手">高手</option>
-              </select>
-            </label>
           </div>
           <div class="player-list" id="playerList"></div>
         </section>
@@ -134,14 +129,6 @@
               <label><input type="checkbox" name="stakes" value="3" /> 三</label>
               <label><input type="checkbox" name="stakes" value="4" /> 四</label>
             </fieldset>
-            <label>
-              <span>水平</span>
-              <select id="skillInput" name="skill">
-                <option value="新手">新手</option>
-                <option value="熟手" selected>熟手</option>
-                <option value="高手">高手</option>
-              </select>
-            </label>
             <button class="secondary" type="submit">添加玩家</button>
           </form>
 
@@ -168,7 +155,6 @@
         <div class="player-main">
           <div class="player-name-line">
             <strong></strong>
-            <span class="skill-pill"></span>
           </div>
           <div class="player-meta"></div>
         </div>

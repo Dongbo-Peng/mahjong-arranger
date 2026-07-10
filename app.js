@@ -1,13 +1,5 @@
 const STORAGE_KEY = "mahjong-arranger-v1";
 const STAKE_VALUES = ["1", "2", "3", "4"];
-const SKILL_VALUES = ["新手", "熟手", "高手"];
-
-const skillScore = {
-  "新手": 1,
-  "熟手": 2,
-  "高手": 3,
-};
-
 const sampleState = {
   players: [
     { id: "p1", name: "老张", preferred: "2", stakes: ["1", "2"], skill: "熟手", active: true },
@@ -37,10 +29,12 @@ const sampleState = {
     { from: "p9", to: "p12" },
   ],
   savedSchedule: null,
+  updatedAt: null,
 };
 
 let state = loadState();
 let lastSchedule = hydrateSavedSchedule(state.savedSchedule);
+const playerEditDrafts = new Map();
 
 const elements = {
   activeCount: document.querySelector("#activeCount"),
@@ -53,9 +47,9 @@ const elements = {
   waitingList: document.querySelector("#waitingList"),
   resultNote: document.querySelector("#resultNote"),
   stakeFilter: document.querySelector("#stakeFilter"),
-  skillFilter: document.querySelector("#skillFilter"),
   toggleAllBtn: document.querySelector("#toggleAllBtn"),
   arrangeBtn: document.querySelector("#arrangeBtn"),
+  dataManageBtn: document.querySelector("#dataManageBtn"),
   resetSampleBtn: document.querySelector("#resetSampleBtn"),
   copyBtn: document.querySelector("#copyBtn"),
   playerForm: document.querySelector("#playerForm"),
@@ -81,6 +75,7 @@ function loadState() {
     }
     if (!Array.isArray(parsed.likes)) parsed.likes = [];
     if (!("savedSchedule" in parsed)) parsed.savedSchedule = null;
+    if (!("updatedAt" in parsed)) parsed.updatedAt = null;
     return parsed;
   } catch {
     return structuredClone(sampleState);
@@ -88,6 +83,7 @@ function loadState() {
 }
 
 function saveState() {
+  state.updatedAt = new Date().toISOString();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
@@ -132,12 +128,6 @@ function stakeText(value) {
   return { "1": "打一", "2": "打二", "3": "打三", "4": "打四" }[value] || `打${value}`;
 }
 
-function skillClass(skill) {
-  if (skill === "新手") return "skill-new";
-  if (skill === "高手") return "skill-pro";
-  return "";
-}
-
 function getPlayer(id) {
   return state.players.find((player) => player.id === id);
 }
@@ -158,6 +148,18 @@ function pairBlocked(a, b) {
   return directedConflict(a, b) || directedConflict(b, a);
 }
 
+function preferredGapBlocked(a, b) {
+  return Math.abs(Number(a.preferred) - Number(b.preferred)) > 1;
+}
+
+function skillGapBlocked(a, b) {
+  return [a.skill, b.skill].includes("新手") && [a.skill, b.skill].includes("高手");
+}
+
+function autoPairBlocked(a, b) {
+  return pairBlocked(a, b) || preferredGapBlocked(a, b) || skillGapBlocked(a, b);
+}
+
 function pairLikeCount(a, b) {
   return Number(directedLike(a, b)) + Number(directedLike(b, a));
 }
@@ -165,10 +167,15 @@ function pairLikeCount(a, b) {
 function hasBlockedPair(group) {
   for (let i = 0; i < group.length; i += 1) {
     for (let j = i + 1; j < group.length; j += 1) {
-      if (pairBlocked(group[i], group[j])) return true;
+      if (autoPairBlocked(group[i], group[j])) return true;
     }
   }
   return false;
+}
+
+function preferredSpread(group) {
+  const values = group.map((player) => Number(player.preferred));
+  return Math.max(...values) - Math.min(...values);
 }
 
 function commonStakes(group) {
@@ -177,27 +184,32 @@ function commonStakes(group) {
 }
 
 function chooseStake(group, options) {
+  const averagePreferred = group.reduce((sum, player) => sum + Number(player.preferred), 0) / group.length;
   return options
     .map((stake) => ({
       stake,
       preferredHits: group.filter((player) => player.preferred === stake).length,
       flexibility: group.reduce((sum, player) => sum + player.stakes.length, 0),
+      distanceFromAverage: Math.abs(Number(stake) - averagePreferred),
     }))
-    .sort((a, b) => b.preferredHits - a.preferredHits || Number(b.stake) - Number(a.stake) || a.flexibility - b.flexibility)[0].stake;
+    .sort(
+      (a, b) =>
+        b.preferredHits - a.preferredHits ||
+        a.distanceFromAverage - b.distanceFromAverage ||
+        Number(a.stake) - Number(b.stake) ||
+        a.flexibility - b.flexibility,
+    )[0].stake;
 }
 
 function scoreGroup(group, chosenStake) {
-  const skills = group.map((player) => skillScore[player.skill]);
-  const spread = Math.max(...skills) - Math.min(...skills);
   const preferredHits = group.filter((player) => player.preferred === chosenStake).length;
-  const sameSkillPairs = group.filter((player) => player.skill === group[0].skill).length;
   let likeScore = 0;
   for (let i = 0; i < group.length; i += 1) {
     for (let j = i + 1; j < group.length; j += 1) {
       likeScore += pairLikeCount(group[i], group[j]);
     }
   }
-  return preferredHits * 28 + (2 - spread) * 18 + sameSkillPairs * 4 + likeScore * 16;
+  return preferredHits * 28 + likeScore * 16;
 }
 
 function combinations(items, size) {
@@ -225,7 +237,7 @@ function createCandidates(players) {
   return combinations(players, 4)
     .map((group) => {
       const options = commonStakes(group);
-      if (!options.length || hasBlockedPair(group)) return null;
+      if (!options.length || preferredSpread(group) > 1 || hasBlockedPair(group)) return null;
       const stake = chooseStake(group, options);
       const mask = group.reduce((bits, player) => bits | (1 << indexById.get(player.id)), 0);
       return {
@@ -314,14 +326,25 @@ function arrangeTables() {
 }
 
 function explainWaiting(player, others) {
-  const compatible = others.filter((other) => !pairBlocked(player, other));
+  const strictBlockedNames = others.filter((other) => pairBlocked(player, other)).map((other) => other.name);
+  if (strictBlockedNames.length) {
+    return `有不愿同桌限制：${strictBlockedNames.slice(0, 3).join("、")}`;
+  }
+
+  const amountGapNames = others.filter((other) => preferredGapBlocked(player, other)).map((other) => other.name);
+  if (amountGapNames.length >= Math.max(1, others.length - 2)) {
+    return `常打金额差距太大，已放入待定`;
+  }
+
+  const skillGapNames = others.filter((other) => skillGapBlocked(player, other)).map((other) => other.name);
+  if (skillGapNames.length) {
+    return `新手和高手不自动同桌，已放入待定`;
+  }
+
+  const compatible = others.filter((other) => !autoPairBlocked(player, other));
   const sameStake = compatible.filter((other) => other.stakes.some((stake) => player.stakes.includes(stake)));
   if (sameStake.length < 3) {
     return `能匹配同一金额的人不足 3 位`;
-  }
-  const blockedNames = others.filter((other) => pairBlocked(player, other)).map((other) => other.name);
-  if (blockedNames.length) {
-    return `有不愿同桌限制：${blockedNames.slice(0, 3).join("、")}`;
   }
   return "人数或组合被其他桌占用，可由老板手动调整";
 }
@@ -342,20 +365,17 @@ function renderSummary() {
 
 function renderPlayers() {
   const stakeFilter = elements.stakeFilter.value;
-  const skillFilter = elements.skillFilter.value;
   elements.playerList.innerHTML = "";
 
   const players = state.players.filter((player) => {
     const stakeOk = stakeFilter === "all" || player.stakes.includes(stakeFilter);
-    const skillOk = skillFilter === "all" || player.skill === skillFilter;
-    return stakeOk && skillOk;
+    return stakeOk;
   });
 
   players.forEach((player) => {
     const node = elements.playerTemplate.content.firstElementChild.cloneNode(true);
     const checkbox = node.querySelector(".attend-check");
     const name = node.querySelector("strong");
-    const skill = node.querySelector(".skill-pill");
     const meta = node.querySelector(".player-meta");
     const deleteBtn = node.querySelector(".delete-player");
 
@@ -370,9 +390,6 @@ function renderPlayers() {
     });
 
     name.textContent = player.name;
-    skill.textContent = player.skill;
-    const extraSkillClass = skillClass(player.skill);
-    if (extraSkillClass) skill.classList.add(extraSkillClass);
 
     player.stakes.forEach((stake) => {
       const pill = document.createElement("span");
@@ -461,7 +478,6 @@ function renderSchedule(schedule) {
               (player) => `
                 <div class="seat">
                   <strong>${escapeHtml(player.name)}</strong>
-                  <span class="skill-pill ${skillClass(player.skill)}">${player.skill}</span>
                   <span class="stake-pill ${player.preferred === table.stake ? "preferred" : ""}">常打${player.preferred}</span>
                 </div>
               `,
@@ -527,6 +543,10 @@ function openDetail(kind) {
   }
   if (kind === "conflicts") {
     showDetail("关系限制", renderConflictsDetail());
+    return;
+  }
+  if (kind === "data") {
+    showDetail("数据保存", renderDataDetail());
   }
 }
 
@@ -547,15 +567,32 @@ function stakeOptions(selected) {
   return STAKE_VALUES.map((stake) => `<option value="${stake}" ${stake === selected ? "selected" : ""}>${stakeText(stake)}</option>`).join("");
 }
 
-function skillOptions(selected) {
-  return SKILL_VALUES.map((skill) => `<option value="${skill}" ${skill === selected ? "selected" : ""}>${skill}</option>`).join("");
-}
-
 function playerOptions(selectedId) {
   return [
     `<option value="">空位</option>`,
     ...activePlayers().map((player) => `<option value="${player.id}" ${player.id === selectedId ? "selected" : ""}>${escapeHtml(player.name)}</option>`),
   ].join("");
+}
+
+function waitingPlayerOptions(schedule) {
+  if (!schedule.waiting.length) return `<option value="">暂无待定人员</option>`;
+  return [
+    `<option value="">选择待定人员</option>`,
+    ...schedule.waiting.map(({ player }) => `<option value="${player.id}">${escapeHtml(player.name)}</option>`),
+  ].join("");
+}
+
+function seatedPlayerOptions(schedule, currentId) {
+  const options = [];
+  schedule.tables.forEach((table, tableIndex) => {
+    normalizedSeats(table).forEach((player, seatIndex) => {
+      if (!player || player.id === currentId) return;
+      options.push(
+        `<option value="${player.id}">${tableIndex + 1}桌${seatIndex + 1}位 ${escapeHtml(player.name)}</option>`,
+      );
+    });
+  });
+  return options.length ? [`<option value="">选择要交换的人</option>`, ...options].join("") : `<option value="">暂无可交换人员</option>`;
 }
 
 function allPlayerOptions(selectedId) {
@@ -581,6 +618,18 @@ function stakeCheckboxes(player) {
   ).join("");
 }
 
+function playerEditValues(player) {
+  const draft = playerEditDrafts.get(player.id);
+  if (!draft) return player;
+  return {
+    ...player,
+    name: draft.name,
+    preferred: draft.preferred,
+    stakes: draft.stakes,
+    active: draft.active,
+  };
+}
+
 function renderAttendanceDetail() {
   const players = state.players;
 
@@ -600,7 +649,6 @@ function renderAttendanceDetail() {
                     <div class="attendance-person">
                       <strong>${escapeHtml(player.name)}</strong>
                       <div class="detail-meta">
-                        <span class="skill-pill ${skillClass(player.skill)}">${player.skill}</span>
                         <span class="stake-pill preferred">常打${player.preferred}</span>
                         ${player.stakes.map((stake) => `<span class="stake-pill">${stakeText(stake)}</span>`).join("")}
                       </div>
@@ -627,7 +675,7 @@ function renderAttendanceDetail() {
   `;
 }
 
-function addPlayer({ name, preferred = "2", stakes = ["1", "2"], skill = "熟手", active = true }) {
+function addPlayer({ name, preferred = "2", stakes = ["1", "2"], active = true }) {
   const cleanName = name.trim();
   if (!cleanName) return false;
   if (!stakes.includes(preferred)) stakes.push(preferred);
@@ -637,7 +685,7 @@ function addPlayer({ name, preferred = "2", stakes = ["1", "2"], skill = "熟手
     name: cleanName,
     preferred,
     stakes: [...new Set(stakes)].sort((a, b) => Number(a) - Number(b)),
-    skill,
+    skill: "熟手",
     active,
   });
 
@@ -649,6 +697,8 @@ function addPlayer({ name, preferred = "2", stakes = ["1", "2"], skill = "熟手
 }
 
 function renderTablesDetail(schedule) {
+  const waitingOptions = waitingPlayerOptions(schedule);
+
   if (!schedule.tables.length) {
     return `
       <div class="detail-tools">
@@ -691,9 +741,32 @@ function renderTablesDetail(schedule) {
                         </label>
                         ${
                           player
-                            ? `<span class="skill-pill ${skillClass(player.skill)}">${player.skill}</span>`
+                            ? `<span class="stake-pill">常打${player.preferred}</span>`
                             : `<span class="stake-pill">空位</span>`
                         }
+                        <div class="seat-action-panel">
+                          ${
+                            player
+                              ? `
+                                <button class="ghost compact" type="button" data-move-seat-waiting data-table-index="${index}" data-seat-index="${seatIndex}">移到待定</button>
+                                <label>
+                                  <span>与桌上人员交换</span>
+                                  <select data-swap-seat-select="${index}-${seatIndex}">
+                                    ${seatedPlayerOptions(schedule, player.id)}
+                                  </select>
+                                </label>
+                                <button class="secondary compact" type="button" data-swap-seat data-table-index="${index}" data-seat-index="${seatIndex}">确认交换</button>
+                              `
+                              : ""
+                          }
+                          <label>
+                            <span>${player ? "从待定换入" : "从待定补入"}</span>
+                            <select data-waiting-seat-select="${index}-${seatIndex}">
+                              ${waitingOptions}
+                            </select>
+                          </label>
+                          <button class="secondary compact" type="button" data-fill-seat-waiting data-table-index="${index}" data-seat-index="${seatIndex}">${player ? "换入此位" : "补入此位"}</button>
+                        </div>
                       </div>
                     `,
                   )
@@ -726,7 +799,6 @@ function renderWaitingDetail(schedule) {
               </div>
               <div>${escapeHtml(reason)}</div>
               <div class="detail-meta">
-                <span class="skill-pill ${skillClass(player.skill)}">${player.skill}</span>
                 ${player.stakes.map((stake) => `<span class="stake-pill">${stakeText(stake)}</span>`).join("")}
               </div>
             </article>
@@ -740,6 +812,7 @@ function renderWaitingDetail(schedule) {
 function renderPlayerEditor(playerId, returnKind = "attendance") {
   const player = getPlayer(playerId);
   if (!player) return `<div class="detail-empty">没有找到这个玩家。</div>`;
+  const editValues = playerEditValues(player);
   const liked = state.likes.filter((rule) => rule.from === player.id);
   const disliked = state.conflicts.filter((rule) => rule.from === player.id);
 
@@ -747,22 +820,18 @@ function renderPlayerEditor(playerId, returnKind = "attendance") {
     <form class="edit-form" data-player-edit-form data-player-id="${player.id}" data-return-kind="${returnKind}">
       <label>
         <span>姓名</span>
-        <input name="name" type="text" value="${escapeHtml(player.name)}" required />
-      </label>
-      <label>
-        <span>水平</span>
-        <select name="skill">${skillOptions(player.skill)}</select>
+        <input name="name" type="text" value="${escapeHtml(editValues.name)}" required />
       </label>
       <label>
         <span>常打金额</span>
-        <select name="preferred">${stakeOptions(player.preferred)}</select>
+        <select name="preferred">${stakeOptions(editValues.preferred)}</select>
       </label>
       <fieldset>
         <legend>可接受金额</legend>
-        ${stakeCheckboxes(player)}
+        ${stakeCheckboxes(editValues)}
       </fieldset>
       <label class="edit-check-row">
-        <input name="active" type="checkbox" ${player.active ? "checked" : ""} />
+        <input name="active" type="checkbox" ${editValues.active ? "checked" : ""} />
         今天报名
       </label>
       <section class="player-relation-box">
@@ -813,6 +882,59 @@ function renderPlayerEditor(playerId, returnKind = "attendance") {
   `;
 }
 
+function renderDataDetail() {
+  const backupText = backupCode();
+  return `
+    <section class="data-status-card">
+      <h3>当前保存方式</h3>
+      <p>现在不需要注册登录。玩家名单、今日报名、喜欢/不喜欢同桌、排桌结果，都会自动保存在这台手机的浏览器里。</p>
+      <div class="data-facts">
+        <div>
+          <span>保存位置</span>
+          <strong>本机浏览器</strong>
+        </div>
+        <div>
+          <span>最后保存</span>
+          <strong>${escapeHtml(formatDateTime(state.updatedAt))}</strong>
+        </div>
+      </div>
+      <p class="data-note">换手机、清理浏览器缓存、换微信账号时，本机数据可能丢失。重要名单建议复制备份码或导出备份文件。</p>
+    </section>
+
+    <section class="data-card">
+      <h3>备份当前数据</h3>
+      <div class="data-actions">
+        <button class="primary" type="button" data-copy-backup>复制备份码</button>
+        <button class="secondary" type="button" data-download-backup>导出备份文件</button>
+      </div>
+      <label class="backup-code-box">
+        <span>备份码</span>
+        <textarea readonly>${escapeHtml(backupText)}</textarea>
+      </label>
+    </section>
+
+    <section class="data-card">
+      <h3>恢复数据</h3>
+      <label class="backup-code-box">
+        <span>粘贴备份码</span>
+        <textarea data-restore-backup-code placeholder="把备份码粘贴到这里"></textarea>
+      </label>
+      <div class="data-actions">
+        <button class="primary" type="button" data-restore-backup>恢复备份码</button>
+        <label class="file-import-button">
+          导入备份文件
+          <input type="file" accept="application/json,.json" data-import-backup-file />
+        </label>
+      </div>
+    </section>
+
+    <section class="data-card">
+      <h3>以后要注册登录怎么办</h3>
+      <p>如果要多台手机共用同一份名单、老板和员工都能同步，就需要下一阶段接云数据库和登录系统。当前版本先保证单手机使用简单稳定。</p>
+    </section>
+  `;
+}
+
 function normalizedSeats(table) {
   const seats = table.group.slice(0, 4);
   while (seats.length < 4) seats.push(null);
@@ -849,44 +971,96 @@ function refreshScheduleViews() {
   saveSchedule();
 }
 
-function savePlayerEdit(form) {
+function readPlayerEditForm(form) {
   const playerId = form.dataset.playerId;
+  const nameInput = form.elements.namedItem("name");
+  const preferred = form.elements.namedItem("preferred").value;
+  const checkedStakes = Array.from(form.querySelectorAll('input[name="stakes"]:checked')).map((input) => input.value);
+  const stakes = [...new Set(checkedStakes.includes(preferred) ? checkedStakes : [...checkedStakes, preferred])].sort((a, b) => Number(a) - Number(b));
+  return {
+    name: (nameInput.value || "").trim(),
+    preferred,
+    stakes,
+    active: form.elements.namedItem("active").checked,
+  };
+}
+
+function rememberPlayerEditDraft(form) {
+  if (!form || !form.dataset.playerId) return;
+  playerEditDrafts.set(form.dataset.playerId, readPlayerEditForm(form));
+}
+
+function applyPlayerEditDraft(playerId, draft, options = {}) {
   const playerIndex = state.players.findIndex((item) => item.id === playerId);
   if (playerIndex < 0) {
     showToast("没有找到这个玩家");
-    return;
+    return false;
   }
 
-  const name = form.elements.namedItem("name").value.trim();
-  const stakes = Array.from(form.querySelectorAll('input[name="stakes"]:checked')).map((input) => input.value);
-  const preferred = form.elements.namedItem("preferred").value;
+  const { name, preferred, stakes, active } = draft;
   if (!name || !stakes.length) {
     showToast("姓名和可接受金额都要填写");
-    return;
+    return false;
   }
 
   const updatedPlayer = {
     ...state.players[playerIndex],
     name,
-    skill: form.elements.namedItem("skill").value,
+    skill: state.players[playerIndex].skill || "熟手",
     preferred,
-    stakes: [...new Set(stakes.includes(preferred) ? stakes : [...stakes, preferred])].sort((a, b) => Number(a) - Number(b)),
-    active: form.elements.namedItem("active").checked,
+    stakes,
+    active,
   };
   state.players.splice(playerIndex, 1, updatedPlayer);
 
   clearSchedule();
   saveState();
-  const savedAgain = getPlayer(playerId);
+  const savedAgain = readSavedPlayer(playerId);
   if (!savedAgain || savedAgain.name !== name) {
     showToast("保存没有成功，请再点一次");
-    return;
+    return false;
   }
+  if (options.clearDraft) playerEditDrafts.delete(playerId);
+  return true;
+}
+
+function applyPlayerEditFromForm(form, options = {}) {
+  rememberPlayerEditDraft(form);
+  const playerId = form.dataset.playerId;
+  const draft = playerEditDrafts.get(playerId) || readPlayerEditForm(form);
+  return applyPlayerEditDraft(playerId, draft, options);
+}
+
+function savePlayerEdit(form) {
+  if (!applyPlayerEditFromForm(form, { clearDraft: true })) return;
 
   render();
   renderEmptyResults();
   showToast("已保存");
   openDetail(form.dataset.returnKind || "attendance");
+}
+
+function captureOpenPlayerEditor(ownerId) {
+  const form = elements.detailBody.querySelector(`[data-player-edit-form][data-player-id="${ownerId}"]`);
+  if (!form) {
+    return {
+      draft: playerEditDrafts.get(ownerId) || null,
+      returnKind: "attendance",
+      form: null,
+    };
+  }
+  const draft = readPlayerEditForm(form);
+  playerEditDrafts.set(ownerId, draft);
+  return {
+    draft,
+    returnKind: form.dataset.returnKind || "attendance",
+    form,
+  };
+}
+
+function saveOpenPlayerEditor(ownerId) {
+  const snapshot = captureOpenPlayerEditor(ownerId);
+  return !snapshot.draft || applyPlayerEditDraft(ownerId, snapshot.draft);
 }
 
 function setDetailAttendance(playerId, active) {
@@ -924,7 +1098,17 @@ function setTableStake(index, stake) {
   showDetail("已排桌号", renderTablesDetail(schedule));
 }
 
-function setTableSeat(tableIndex, seatIndex, playerId) {
+function findPlayerSeat(schedule, playerId) {
+  let found = null;
+  schedule.tables.forEach((table, tIndex) => {
+    table.group.forEach((player, sIndex) => {
+      if (player && player.id === playerId) found = { table, tIndex, sIndex };
+    });
+  });
+  return found;
+}
+
+function setTableSeat(tableIndex, seatIndex, playerId, message = "") {
   const schedule = ensureSchedule();
   normalizeSchedule(schedule);
   const targetTable = schedule.tables[tableIndex];
@@ -936,12 +1120,7 @@ function setTableSeat(tableIndex, seatIndex, playerId) {
   if (!newPlayer) {
     targetTable.group[seatIndex] = null;
   } else {
-    let existing = null;
-    schedule.tables.forEach((table, tIndex) => {
-      table.group.forEach((player, sIndex) => {
-        if (player && player.id === newPlayer.id) existing = { table, tIndex, sIndex };
-      });
-    });
+    const existing = findPlayerSeat(schedule, newPlayer.id);
 
     if (existing && (existing.tIndex !== tableIndex || existing.sIndex !== seatIndex)) {
       existing.table.group[existing.sIndex] = oldSeatPlayer;
@@ -951,6 +1130,47 @@ function setTableSeat(tableIndex, seatIndex, playerId) {
 
   refreshScheduleViews();
   showDetail("已排桌号", renderTablesDetail(schedule));
+  if (message) showToast(message);
+}
+
+function moveSeatToWaiting(tableIndex, seatIndex) {
+  setTableSeat(tableIndex, seatIndex, "", "已移到待定");
+}
+
+function fillSeatFromWaiting(tableIndex, seatIndex, playerId) {
+  if (!playerId) {
+    showToast("请先选择待定人员");
+    return;
+  }
+  setTableSeat(tableIndex, seatIndex, playerId, "已换入座位");
+}
+
+function swapSeatWithPlayer(tableIndex, seatIndex, targetPlayerId) {
+  if (!targetPlayerId) {
+    showToast("请先选择要交换的人");
+    return;
+  }
+
+  const schedule = ensureSchedule();
+  normalizeSchedule(schedule);
+  const targetTable = schedule.tables[tableIndex];
+  const otherSeat = findPlayerSeat(schedule, targetPlayerId);
+  if (!targetTable || !otherSeat) {
+    showToast("没有找到要交换的人");
+    return;
+  }
+
+  const currentPlayer = targetTable.group[seatIndex] || null;
+  if (!currentPlayer) {
+    showToast("这个座位现在是空位");
+    return;
+  }
+
+  targetTable.group[seatIndex] = otherSeat.table.group[otherSeat.sIndex];
+  otherSeat.table.group[otherSeat.sIndex] = currentPlayer;
+  refreshScheduleViews();
+  showDetail("已排桌号", renderTablesDetail(schedule));
+  showToast("已交换座位");
 }
 
 function renderConflictsDetail() {
@@ -1063,16 +1283,18 @@ function deleteConflict(index) {
   persistConflictChange("已删除关系");
 }
 
-function persistPlayerRelationChange(ownerId, message) {
+function persistPlayerRelationChange(ownerId, message, options = {}) {
+  if (options.draft) playerEditDrafts.set(ownerId, options.draft);
   clearSchedule();
   saveState();
   render();
   renderEmptyResults();
-  showDetail("修改玩家", renderPlayerEditor(ownerId, "attendance"));
+  if (options.draft) playerEditDrafts.set(ownerId, options.draft);
+  showDetail("修改玩家", renderPlayerEditor(ownerId, options.returnKind || "attendance"));
   if (message) showToast(message);
 }
 
-function addPlayerLike(ownerId, targetId) {
+function addPlayerLike(ownerId, targetId, options = {}) {
   if (!ownerId || !targetId || ownerId === targetId) {
     showToast("请选择另一个人");
     return;
@@ -1086,15 +1308,15 @@ function addPlayerLike(ownerId, targetId) {
     return;
   }
   state.likes.push({ from: ownerId, to: targetId });
-  persistPlayerRelationChange(ownerId, "已添加喜欢");
+  persistPlayerRelationChange(ownerId, "已添加喜欢", options);
 }
 
-function deletePlayerLike(ownerId, targetId) {
+function deletePlayerLike(ownerId, targetId, options = {}) {
   state.likes = state.likes.filter((rule) => !(rule.from === ownerId && rule.to === targetId));
-  persistPlayerRelationChange(ownerId, "已删除喜欢");
+  persistPlayerRelationChange(ownerId, "已删除喜欢", options);
 }
 
-function addPlayerDislike(ownerId, targetId) {
+function addPlayerDislike(ownerId, targetId, options = {}) {
   if (!ownerId || !targetId || ownerId === targetId) {
     showToast("请选择另一个人");
     return;
@@ -1105,12 +1327,12 @@ function addPlayerDislike(ownerId, targetId) {
     return;
   }
   state.conflicts.push({ from: ownerId, to: targetId });
-  persistPlayerRelationChange(ownerId, "已添加不喜欢");
+  persistPlayerRelationChange(ownerId, "已添加不喜欢", options);
 }
 
-function deletePlayerDislike(ownerId, targetId) {
+function deletePlayerDislike(ownerId, targetId, options = {}) {
   state.conflicts = state.conflicts.filter((rule) => !(rule.from === ownerId && rule.to === targetId));
-  persistPlayerRelationChange(ownerId, "已删除不喜欢");
+  persistPlayerRelationChange(ownerId, "已删除不喜欢", options);
 }
 
 function deletePlayer(id) {
@@ -1140,6 +1362,15 @@ function collectFormStakes(form) {
   return Array.from(form.querySelectorAll('input[name="stakes"]:checked')).map((input) => input.value);
 }
 
+function readSavedPlayer(playerId) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    return Array.isArray(saved.players) ? saved.players.find((player) => player.id === playerId) : null;
+  } catch {
+    return null;
+  }
+}
+
 function nextId() {
   return `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
@@ -1152,6 +1383,132 @@ function scheduleText(schedule) {
   const waitingLines = schedule.waiting.map(({ player, reason }) => `${player.name}：${reason}`);
   return [...tableLines, "", "暂未安排：", waitingLines.length ? waitingLines.join("\n") : "暂无"].join("\n");
 }
+
+function formatDateTime(value) {
+  if (!value) return "还没有保存记录";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "还没有保存记录";
+  return date.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function backupPayload() {
+  return {
+    app: "mahjong-arranger",
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    state,
+  };
+}
+
+function backupCode() {
+  return JSON.stringify(backupPayload());
+}
+
+function backupFileName() {
+  const date = new Date().toISOString().slice(0, 10);
+  return `麻将排桌备份-${date}.json`;
+}
+
+function downloadBackup() {
+  const blob = new Blob([backupCode()], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = backupFileName();
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showToast("已生成备份文件");
+}
+
+async function copyBackup() {
+  const text = backupCode();
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast("备份码已复制");
+  } catch {
+    showToast("复制失败，可长按备份码手动复制");
+  }
+}
+
+function normalizeImportedState(raw) {
+  const candidate = raw && raw.state ? raw.state : raw;
+  if (!candidate || !Array.isArray(candidate.players) || !Array.isArray(candidate.conflicts)) {
+    throw new Error("备份内容不正确");
+  }
+
+  const players = candidate.players
+    .filter((player) => player && player.id && player.name)
+    .map((player) => {
+      const stakes = Array.isArray(player.stakes) && player.stakes.length ? player.stakes.map(String) : ["1", "2"];
+      const preferredValue = String(player.preferred || stakes[0] || "1");
+      const preferred = STAKE_VALUES.includes(preferredValue) ? preferredValue : "1";
+      const cleanStakes = [...new Set(stakes.includes(preferred) ? stakes : [...stakes, preferred])].filter((stake) => STAKE_VALUES.includes(stake));
+      return {
+        id: String(player.id),
+        name: String(player.name),
+        preferred,
+        stakes: cleanStakes.length ? cleanStakes : [preferred],
+        skill: "熟手",
+        active: Boolean(player.active),
+      };
+    });
+
+  if (!players.length) throw new Error("备份里没有玩家");
+  const playerIds = new Set(players.map((player) => player.id));
+  const cleanRules = (rules) =>
+    (Array.isArray(rules) ? rules : [])
+      .filter((rule) => rule && playerIds.has(rule.from) && playerIds.has(rule.to) && rule.from !== rule.to)
+      .map((rule) => ({ from: String(rule.from), to: String(rule.to) }));
+
+  return {
+    players,
+    conflicts: cleanRules(candidate.conflicts),
+    likes: cleanRules(candidate.likes),
+    savedSchedule: candidate.savedSchedule && typeof candidate.savedSchedule === "object" ? candidate.savedSchedule : null,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function restoreBackupText(text) {
+  if (!text.trim()) {
+    showToast("请先粘贴备份码");
+    return;
+  }
+  try {
+    const imported = normalizeImportedState(JSON.parse(text));
+    state = imported;
+    lastSchedule = hydrateSavedSchedule(state.savedSchedule);
+    saveState();
+    render();
+    if (lastSchedule) {
+      renderSchedule(lastSchedule);
+    } else {
+      renderEmptyResults();
+    }
+    showToast("已恢复数据");
+    showDetail("数据保存", renderDataDetail());
+  } catch {
+    showToast("备份码不正确");
+  }
+}
+
+function importBackupFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.addEventListener("load", () => restoreBackupText(String(reader.result || "")));
+  reader.addEventListener("error", () => showToast("备份文件读取失败"));
+  reader.readAsText(file, "utf-8");
+}
+
+elements.dataManageBtn.addEventListener("click", () => openDetail("data"));
 
 elements.arrangeBtn.addEventListener("click", () => {
   lastSchedule = arrangeTables();
@@ -1167,7 +1524,36 @@ elements.detailCloseButtons.forEach((button) => {
   button.addEventListener("click", closeDetail);
 });
 
+elements.detailBody.addEventListener(
+  "pointerdown",
+  (event) => {
+    const relationButton = event.target.closest(
+      "[data-add-player-like], [data-add-player-dislike], [data-delete-player-like], [data-delete-player-dislike], [data-save-player-edit]",
+    );
+    if (!relationButton) return;
+    const form = relationButton.closest("[data-player-edit-form]");
+    if (form) rememberPlayerEditDraft(form);
+  },
+  true,
+);
+
 elements.detailBody.addEventListener("click", (event) => {
+  if (event.target.closest("[data-copy-backup]")) {
+    copyBackup();
+    return;
+  }
+
+  if (event.target.closest("[data-download-backup]")) {
+    downloadBackup();
+    return;
+  }
+
+  if (event.target.closest("[data-restore-backup]")) {
+    const textarea = elements.detailBody.querySelector("[data-restore-backup-code]");
+    restoreBackupText(textarea ? textarea.value : "");
+    return;
+  }
+
   const editButton = event.target.closest("[data-edit-player]");
   if (editButton) {
     showDetail("修改玩家", renderPlayerEditor(editButton.dataset.editPlayer, editButton.dataset.returnKind));
@@ -1176,6 +1562,8 @@ elements.detailBody.addEventListener("click", (event) => {
 
   const cancelButton = event.target.closest("[data-cancel-edit]");
   if (cancelButton) {
+    const form = cancelButton.closest("[data-player-edit-form]");
+    if (form) playerEditDrafts.delete(form.dataset.playerId);
     openDetail(cancelButton.dataset.cancelEdit || "attendance");
     return;
   }
@@ -1197,31 +1585,65 @@ elements.detailBody.addEventListener("click", (event) => {
     return;
   }
 
+  const moveSeatButton = event.target.closest("[data-move-seat-waiting]");
+  if (moveSeatButton) {
+    moveSeatToWaiting(Number(moveSeatButton.dataset.tableIndex), Number(moveSeatButton.dataset.seatIndex));
+    return;
+  }
+
+  const fillSeatButton = event.target.closest("[data-fill-seat-waiting]");
+  if (fillSeatButton) {
+    const tableIndex = Number(fillSeatButton.dataset.tableIndex);
+    const seatIndex = Number(fillSeatButton.dataset.seatIndex);
+    const select = elements.detailBody.querySelector(`[data-waiting-seat-select="${tableIndex}-${seatIndex}"]`);
+    fillSeatFromWaiting(tableIndex, seatIndex, select ? select.value : "");
+    return;
+  }
+
+  const swapSeatButton = event.target.closest("[data-swap-seat]");
+  if (swapSeatButton) {
+    const tableIndex = Number(swapSeatButton.dataset.tableIndex);
+    const seatIndex = Number(swapSeatButton.dataset.seatIndex);
+    const select = elements.detailBody.querySelector(`[data-swap-seat-select="${tableIndex}-${seatIndex}"]`);
+    swapSeatWithPlayer(tableIndex, seatIndex, select ? select.value : "");
+    return;
+  }
+
   const addLikeButton = event.target.closest("[data-add-player-like]");
   if (addLikeButton) {
     const ownerId = addLikeButton.dataset.addPlayerLike;
+    const snapshot = captureOpenPlayerEditor(ownerId);
+    if (snapshot.draft && !applyPlayerEditDraft(ownerId, snapshot.draft)) return;
     const select = elements.detailBody.querySelector(`[data-add-like-select="${ownerId}"]`);
-    addPlayerLike(ownerId, select ? select.value : "");
+    addPlayerLike(ownerId, select ? select.value : "", snapshot);
     return;
   }
 
   const addDislikeButton = event.target.closest("[data-add-player-dislike]");
   if (addDislikeButton) {
     const ownerId = addDislikeButton.dataset.addPlayerDislike;
+    const snapshot = captureOpenPlayerEditor(ownerId);
+    if (snapshot.draft && !applyPlayerEditDraft(ownerId, snapshot.draft)) return;
     const select = elements.detailBody.querySelector(`[data-add-dislike-select="${ownerId}"]`);
-    addPlayerDislike(ownerId, select ? select.value : "");
+    addPlayerDislike(ownerId, select ? select.value : "", snapshot);
     return;
   }
 
   const deleteLikeButton = event.target.closest("[data-delete-player-like]");
   if (deleteLikeButton) {
-    deletePlayerLike(deleteLikeButton.dataset.deletePlayerLike, deleteLikeButton.dataset.targetPlayer);
+    const ownerId = deleteLikeButton.dataset.deletePlayerLike;
+    const snapshot = captureOpenPlayerEditor(ownerId);
+    if (snapshot.draft && !applyPlayerEditDraft(ownerId, snapshot.draft)) return;
+    deletePlayerLike(ownerId, deleteLikeButton.dataset.targetPlayer, snapshot);
     return;
   }
 
   const deleteDislikeButton = event.target.closest("[data-delete-player-dislike]");
   if (deleteDislikeButton) {
-    deletePlayerDislike(deleteDislikeButton.dataset.deletePlayerDislike, deleteDislikeButton.dataset.targetPlayer);
+    const ownerId = deleteDislikeButton.dataset.deletePlayerDislike;
+    const snapshot = captureOpenPlayerEditor(ownerId);
+    if (snapshot.draft && !applyPlayerEditDraft(ownerId, snapshot.draft)) return;
+    deletePlayerDislike(ownerId, deleteDislikeButton.dataset.targetPlayer, snapshot);
     return;
   }
 
@@ -1233,6 +1655,16 @@ elements.detailBody.addEventListener("click", (event) => {
 });
 
 elements.detailBody.addEventListener("change", (event) => {
+  const editForm = event.target.closest("[data-player-edit-form]");
+  if (editForm) rememberPlayerEditDraft(editForm);
+
+  const backupFile = event.target.closest("[data-import-backup-file]");
+  if (backupFile) {
+    importBackupFile(backupFile.files && backupFile.files[0]);
+    backupFile.value = "";
+    return;
+  }
+
   const detailAttend = event.target.closest("[data-detail-attend]");
   if (detailAttend) {
     setDetailAttendance(detailAttend.dataset.detailAttend, detailAttend.checked);
@@ -1249,6 +1681,11 @@ elements.detailBody.addEventListener("change", (event) => {
   if (seatSelect) {
     setTableSeat(Number(seatSelect.dataset.tableIndex), Number(seatSelect.dataset.seatIndex), seatSelect.value);
   }
+});
+
+elements.detailBody.addEventListener("input", (event) => {
+  const form = event.target.closest("[data-player-edit-form]");
+  if (form) rememberPlayerEditDraft(form);
 });
 
 elements.detailBody.addEventListener("submit", (event) => {
@@ -1314,7 +1751,6 @@ elements.resetSampleBtn.addEventListener("click", () => {
 });
 
 elements.stakeFilter.addEventListener("change", renderPlayers);
-elements.skillFilter.addEventListener("change", renderPlayers);
 
 elements.playerForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -1322,10 +1758,9 @@ elements.playerForm.addEventListener("submit", (event) => {
   const name = form.elements.namedItem("name").value.trim();
   const stakes = collectFormStakes(form);
   const preferred = form.elements.namedItem("preferred").value;
-  const skill = form.elements.namedItem("skill").value;
 
   if (!name || !stakes.length) return;
-  if (addPlayer({ name, preferred, stakes, skill })) form.reset();
+  if (addPlayer({ name, preferred, stakes })) form.reset();
 });
 
 elements.preferredInput.addEventListener("change", () => {

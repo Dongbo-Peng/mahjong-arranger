@@ -33,7 +33,8 @@ body.modal-open {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -249,14 +250,26 @@ legend {
 }
 
 select,
-input[type="text"] {
+input[type="text"],
+textarea {
   width: 100%;
-  min-height: 44px;
   border: 1px solid var(--strong-line);
   border-radius: 8px;
   background: #fff;
   color: var(--ink);
+}
+
+select,
+input[type="text"] {
+  min-height: 44px;
   padding: 0 10px;
+}
+
+textarea {
+  min-height: 130px;
+  padding: 10px;
+  resize: vertical;
+  line-height: 1.45;
 }
 
 .player-list {
@@ -336,7 +349,6 @@ input[type="text"] {
   white-space: nowrap;
 }
 
-.skill-pill,
 .stake-pill,
 .conflict-pill,
 .like-pill {
@@ -347,21 +359,6 @@ input[type="text"] {
   border-radius: 999px;
   font-size: 12px;
   font-weight: 800;
-}
-
-.skill-pill {
-  background: #eef2ff;
-  color: #3730a3;
-}
-
-.skill-pill.skill-new {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.skill-pill.skill-pro {
-  background: #fee2e2;
-  color: #991b1b;
 }
 
 .player-meta {
@@ -804,6 +801,33 @@ fieldset label {
   background: #fff;
 }
 
+.seat-action-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+
+.seat-action-panel label {
+  display: grid;
+  gap: 5px;
+}
+
+.seat-action-panel label span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.seat-action-panel button,
+.seat-action-panel select {
+  width: 100%;
+  min-height: 44px;
+}
+
 .detail-seat strong {
   font-size: 20px;
 }
@@ -912,6 +936,100 @@ fieldset label {
 .relation-empty-text {
   color: var(--muted);
   font-size: 14px;
+}
+
+.data-status-card,
+.data-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+}
+
+.data-status-card {
+  border-color: #b8dbd5;
+  background: #f0fbf8;
+}
+
+.data-status-card p,
+.data-card p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.data-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.data-facts div {
+  display: grid;
+  gap: 6px;
+  min-height: 72px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.data-facts span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.data-facts strong {
+  font-size: 18px;
+}
+
+.data-note {
+  color: #7c4a03 !important;
+}
+
+.data-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.data-actions button,
+.file-import-button {
+  flex: 1;
+}
+
+.backup-code-box {
+  display: grid;
+  gap: 6px;
+}
+
+.backup-code-box textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.file-import-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: 1px solid #b8dbd5;
+  border-radius: 8px;
+  background: #edf7f5;
+  color: var(--green-dark);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.file-import-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .edit-form fieldset {
@@ -1092,10 +1210,17 @@ fieldset label {
   }
 
   select,
-  input[type="text"] {
+  input[type="text"],
+  textarea {
     min-height: 56px;
     padding: 0 14px;
     font-size: 20px;
+  }
+
+  textarea {
+    min-height: 170px;
+    padding: 12px;
+    font-size: 16px;
   }
 
   .player-list {
@@ -1130,7 +1255,6 @@ fieldset label {
     font-size: 22px;
   }
 
-  .skill-pill,
   .stake-pill,
   .conflict-pill,
   .like-pill {
@@ -1356,7 +1480,13 @@ fieldset label {
     padding: 12px;
   }
 
+  .seat-action-panel {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+
   .detail-seat select,
+  .seat-action-panel select,
   .table-stake-edit select,
   .edit-form select,
   .edit-form input[type="text"],
@@ -1398,6 +1528,24 @@ fieldset label {
   .relation-form {
     gap: 14px;
     padding: 12px;
+  }
+
+  .data-status-card,
+  .data-card {
+    padding: 12px;
+  }
+
+  .data-facts,
+  .data-actions {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .data-actions button,
+  .file-import-button {
+    width: 100%;
+    min-height: 56px;
+    font-size: 19px;
   }
 
   .edit-form fieldset {
