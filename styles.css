@@ -354,7 +354,19 @@ textarea {
 }
 
 .player-main {
+  display: grid;
+  width: 100%;
   min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.player-main:active,
+.attendance-person:active {
+  transform: scale(0.99);
 }
 
 .player-name-line {
@@ -705,7 +717,7 @@ fieldset label {
 
 .attendance-detail-row {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-columns: 36px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   min-height: 78px;
@@ -732,7 +744,19 @@ fieldset label {
 }
 
 .attendance-person {
+  display: grid;
   min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.64);
+  color: inherit;
+  text-align: left;
+}
+
+.attendance-person:hover,
+.player-main:hover {
+  background: #f7fcfb;
 }
 
 .attendance-person strong {
@@ -1530,13 +1554,6 @@ fieldset label {
     align-items: start;
     min-height: 104px;
     padding: 12px;
-  }
-
-  .attendance-detail-row .secondary {
-    grid-column: 1 / -1;
-    width: 100%;
-    min-height: 54px;
-    font-size: 19px;
   }
 
   .quick-add-player {

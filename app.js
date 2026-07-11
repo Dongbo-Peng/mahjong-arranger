@@ -427,6 +427,7 @@ function renderPlayers() {
   players.forEach((player) => {
     const node = elements.playerTemplate.content.firstElementChild.cloneNode(true);
     const checkbox = node.querySelector(".attend-check");
+    const playerMain = node.querySelector(".player-main");
     const name = node.querySelector("strong");
     const meta = node.querySelector(".player-meta");
     const deleteBtn = node.querySelector(".delete-player");
@@ -442,6 +443,8 @@ function renderPlayers() {
     });
 
     name.textContent = player.name;
+    playerMain.dataset.editPlayer = player.id;
+    playerMain.dataset.returnKind = "attendance";
 
     player.stakes.forEach((stake) => {
       const pill = document.createElement("span");
@@ -681,14 +684,13 @@ function renderAttendanceDetail() {
                       <input type="checkbox" data-detail-attend="${player.id}" ${player.active ? "checked" : ""} />
                       <span class="checkmark"></span>
                     </label>
-                    <div class="attendance-person">
+                    <button class="attendance-person" type="button" data-edit-player="${player.id}" data-return-kind="attendance" title="修改玩家信息">
                       <strong>${escapeHtml(player.name)}</strong>
                       <div class="detail-meta">
                         <span class="stake-pill preferred">常打${player.preferred}</span>
                         ${player.stakes.map((stake) => `<span class="stake-pill">${stakeText(stake)}</span>`).join("")}
                       </div>
-                    </div>
-                    <button class="secondary compact" type="button" data-edit-player="${player.id}" data-return-kind="attendance">修改</button>
+                    </button>
                   </article>
                 `,
               )
